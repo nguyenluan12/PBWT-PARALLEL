@@ -3,19 +3,17 @@
 #include <algorithm>
 #include <numeric>
 #include <omp.h>
-#include "pbwt.h"
+#include "pbwt-sites.h"
 #include <thread>
 #include <chrono>
 #include <fstream>
 #include <iterator>
 #include <bits/stdc++.h>
-#include <boost/iostreams/filtering_streambuf.hpp>
-#include <boost/iostreams/copy.hpp>
-#include <boost/iostreams/filter/gzip.hpp>
+
+#include "util.h"
 
 using namespace std;
 using namespace chrono;
-using namespace boost::iostreams;
 
 vector<vector<vector<int> > > build_prefix_and_divergence_arrays(const vector<vector<int> > &X, int thread) {
     // Number of haplotypes
@@ -257,101 +255,10 @@ vector<vector<int> > report_long_matches(const vector<vector<int> > &X, const in
     return results;
 }
 
-vector<vector<int> > read_hap(const string &filename) {
-    vector<vector<int> > res;
-    ifstream ifs(filename); // open the file
-    string tempstr;
-    while (getline(ifs, tempstr)) {
-        stringstream lineStream(tempstr);
-        vector<int> numbers(istream_iterator<int>(lineStream), {});
-        if (res.empty()) {
-            for (auto number: numbers) {
-                res.push_back(vector<int>{number});
-            }
-        } else {
-            for (int i = 0; i < numbers.size(); ++i) {
-                res[i].push_back(numbers[i]);
-            }
-        }
-    }
-    ifs.close();
-    return res;
-}
-
-
-vector<vector<int> > read_hap_gz(const string &filename){
-    vector<vector<int> > res;
-    ifstream file(filename, ios_base::in | ios_base::binary);
-    filtering_streambuf<input> inbuf;
-    inbuf.push(gzip_decompressor());
-    inbuf.push(file);
-    //Convert streambuf to istream
-    istream instream(&inbuf);
-    //Iterate lines
-    string line;
-    while(getline(instream, line)) {
-        stringstream lineStream(line);
-        vector<int> numbers(istream_iterator<int>(lineStream), {});
-        if (res.empty()) {
-            for (auto number: numbers) {
-                res.push_back(vector<int>{number});
-            }
-        } else {
-            for (int i = 0; i < numbers.size(); ++i) {
-                res[i].push_back(numbers[i]);
-            }
-        }
-    }
-    file.close();
-    return res;
-}
-
-int main() {
-    // vector<vector<int> > X = {
-    //     {0, 1, 0, 1, 0, 1},
-    //     {1, 1, 0, 0, 0, 1},
-    //     {1, 1, 1, 1, 1, 1},
-    //     {0, 1, 1, 1, 1, 0},
-    //     {0, 0, 0, 0, 0, 0},
-    //     {1, 0, 0, 0, 1, 0},
-    //     {1, 1, 0, 0, 0, 1},
-    //     {0, 1, 0, 1, 1, 0}
-    // };
-
-    // vector<vector<int> > X = {
-    //     {0, 1, 1, 1, 1, 0, 0, 0, 0, 0},
-    //     {1, 1, 0, 1, 0, 0, 0, 1, 0, 1},
-    //     {0, 1, 0, 1, 0, 0, 0, 1, 0, 1},
-    //     {0, 0, 1, 1, 0, 1, 0, 1, 0, 0},
-    //     {1, 0, 1, 1, 0, 0, 0, 0, 1, 0},
-    //     {1, 0, 1, 1, 0, 0, 0, 0, 1, 1},
-    //     {0, 1, 1, 1, 1, 0, 0, 0, 0, 1},
-    //     {0, 1, 0, 0, 1, 0, 1, 0, 0, 1},
-    //     {0, 1, 0, 0, 0, 0, 0, 0, 1, 0},
-    //     {1, 0, 1, 1, 0, 0, 0, 0, 1, 0}
-    // };
-
-    // vector<vector<int> > X;
-     int width = 100;
-     int height = 10000;
-    // for (int i = 0; i < height; ++i) {
-    //     vector<int> tmp;
-    //     for (int j = 0; j < width; ++j) {
-    //         tmp.push_back(rand() % 2);
-    //     } {
-    //         X.push_back(tmp);
-    //         printf("Init: %lu/%d\n", X.size(), height);
-    //     }
-    // }
-    // printf("Init: done\n");
-
-     string f = "/home/pbthang/CLionProjects/untitled/ecoli.hap";
-     printf("Read file: %s\n",f.c_str());
-     vector<vector<int> > X = read_hap(f);
-
-  // string f = "/home/pbthang/CLionProjects/untitled/chr6_all.hap.gz";
-  // printf("Read file: %s\n",f.c_str());
-  // vector<vector<int> > X = read_hap_gz(f);
+int main(int argc, char *argv[]) {
+    string f = argv[1];
+    printf("Read file: %s\n", f.c_str());
+    vector<vector<int> > X = read_hap(f);
 
     const int retry = 1;
     const int L = 4;
@@ -361,25 +268,14 @@ int main() {
 
     int nthreads = static_cast<int>(thread::hardware_concurrency());
     printf("Max thread:%d\n\n", nthreads);
-
-
-      //  vector<vector<int> > X;
-      //  for (int i = 0; i < height; ++i) {
-      //      vector<int> tmp;
-      //      for (int j = 0; j < width; ++j) {
-      //          tmp.push_back(rand() % 2);
-      //      } {
-      //          X.push_back(tmp);
-      //      }
-      //  }
-        for (int i = 2; i <= nthreads; ++i) {
-            printf("Num thread:%d\n", i);
-            signed long int duration_total_build = 0;
-            signed long int duration_total_match = 0;
-            high_resolution_clock::time_point start, stop;
-            vector<vector<int> > matches;
-            vector<vector<vector<int> > > res;
-            for (int j = 0; j < retry; ++j) {
+    for (int i = 1; i <= nthreads; ++i) {
+        printf("Num thread:%d\n", i);
+        signed long int duration_total_build = 0;
+        signed long int duration_total_match = 0;
+        high_resolution_clock::time_point start, stop;
+        vector<vector<int> > matches;
+        vector<vector<vector<int> > > res;
+        for (int j = 0; j < retry; ++j) {
             start = high_resolution_clock::now();
             res = build_prefix_and_divergence_arrays(X, i);
             stop = high_resolution_clock::now();
@@ -388,33 +284,11 @@ int main() {
             matches = report_long_matches(X, L, res, i);
             stop = high_resolution_clock::now();
             duration_total_match += duration_cast<microseconds>(stop - start).count();
-
-            // for (const auto &match: matches) {
-            //     cout << "Position " << match[0] << ": ma = [";
-            //     size_t idx = 1;
-            //     while (idx < match.size() && match[idx] != -1) {
-            //         cout << match[idx++];
-            //         if (idx < match.size() && match[idx] != -1) {
-            //             cout << ", ";
-            //         }
-            //     }
-            //     cout << "], mb = [";
-            //     while (idx < match.size() && match[idx] == -1) {
-            //         ++idx; // Skip the -1 separator
-            //     }
-            //     while (idx < match.size()) {
-            //         cout << match[idx++];
-            //         if (idx < match.size()) {
-            //             cout << ", ";
-            //         }
-            //     }
-            //     cout << "]" << endl;
-            // }
-            }
+            print_matches(matches);
+        }
         printf("Build time: %ld us\n", duration_total_build / retry);
-        printf("Match time: %ld us\n",  duration_total_match / retry);
-        printf("Total time: %ld us\n\n",  duration_total_match / retry + duration_total_build / retry);
-
+        printf("Match time: %ld us\n", duration_total_match / retry);
+        printf("Total time: %ld us\n\n", duration_total_match / retry + duration_total_build / retry);
     }
 }
 

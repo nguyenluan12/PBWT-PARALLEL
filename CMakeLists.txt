@@ -7,12 +7,18 @@ add_executable(randomizer
         randomizer.cpp
 )
 
-add_executable(pbwt
-        pbwt.cpp pbwt.h
+add_executable(pbwt-parallel-sites
+        pbwt-sites.cpp pbwt-sites.h
+        util.cpp util.h
+)
+add_executable(pbwt-parallel-haps
+        pbwt-haps.cpp pbwt-haps.h
+        util.cpp util.h
 )
 
-add_executable(pbwt_1
-        pbwt_1.cpp
+add_executable(pbwt-single
+        pbwt-single.cpp
+        util.cpp util.h
 )
 
 find_package(OpenMP REQUIRED)
@@ -27,6 +33,7 @@ set(Boost_REALPATH    OFF)
 find_package(Boost REQUIRED COMPONENTS iostreams)
 if(Boost_FOUND)
     include_directories(${Boost_INCLUDE_DIRS})
-    target_link_libraries(pbwt_1 ${Boost_LIBRARIES})
-    target_link_libraries(pbwt ${Boost_LIBRARIES})
+    target_link_libraries(pbwt-single ${Boost_LIBRARIES})
+    target_link_libraries(pbwt-parallel-sites ${Boost_LIBRARIES})
+    target_link_libraries(pbwt-parallel-haps ${Boost_LIBRARIES})
 endif()
