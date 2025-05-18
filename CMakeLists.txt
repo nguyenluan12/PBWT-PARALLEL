@@ -8,11 +8,11 @@ add_executable(randomizer
 )
 
 add_executable(pbwt-parallel-sites
-        pbwt-sites.cpp pbwt-sites.h
+        pbwt-sites.cpp
         util.cpp util.h
 )
 add_executable(pbwt-parallel-haps
-        pbwt-haps.cpp pbwt-haps.h
+        pbwt-haps.cpp
         util.cpp util.h
 )
 

@@ -1,294 +1,334 @@
-#include <iostream>
 #include <vector>
-#include <algorithm>
 #include <numeric>
+#include <algorithm>
 #include <omp.h>
-#include "pbwt-sites.h"
-#include <thread>
-#include <chrono>
-#include <fstream>
-#include <iterator>
-#include <bits/stdc++.h>
+#include <string>
+#include <utility> // For std::pair
 
 #include "util.h"
 
 using namespace std;
 using namespace chrono;
 
-vector<vector<vector<int> > > build_prefix_and_divergence_arrays(const vector<vector<int> > &X, int thread) {
-    // Number of haplotypes
-    int M = static_cast<int>(X.size());
+void algorithm_2_BuildPrefixAndDivergenceArrays(
+    const vector<int> &x_k,
+    int k, vector<int> &a,
+    vector<int> &b,
+    vector<int> &d,
+    vector<int> &e,
+    int M_haps) {
+    int u = 0, v = 0;
+    int p_val = k + 1, q_val = k + 1;
 
-    // Number of variable sites
-    int N = static_cast<int>(X[0].size());
-    vector<vector<int> > ppa_t;
-    vector<vector<int> > div_t;
-    vector<vector<int> > range;
-    omp_set_dynamic(0);
-    omp_set_num_threads(thread);
-#pragma omp parallel
-    {
-        vector<int> ppa;
-        vector<int> div;
-        // Initialize positional prefix array and divergence array
-        ppa.resize(M);
-        div.resize(M, 0);
-
-        // Fill initial ppa with indices
-        for (int i = 0; i < M; ++i) {
-            ppa[i] = i;
-        }
-        const int nthreads = omp_get_num_threads();
-        const int ithread = omp_get_thread_num();
-        int start = ithread * N / nthreads;
-        int finish = (ithread + 1) * N / nthreads;
-        // Iterate over variants
-        for (int k = start; k < finish; ++k) {
-            // Temporary vectors to store intermediates
-            vector<int> a, b, d, e;
-            int p = k + 1, q = k + 1;
-
-            // Iterate over haplotypes in reverse prefix sorted order
-            for (int i = 0; i < M; ++i) {
-                int index = ppa[i];
-                int match_start = div[i];
-                const vector<int> &haplotype = X[index];
-                int allele = haplotype[k];
-
-                // Update intermediates
-                if (match_start > p) {
-                    p = match_start;
-                }
-                if (match_start > q) {
-                    q = match_start;
-                }
-
-                if (allele == 0) {
-                    a.push_back(index);
-                    d.push_back(p);
-                    p = start;
-                } else {
-                    b.push_back(index);
-                    e.push_back(q);
-                    q = start;
-                }
-            }
-
-            // Construct the new arrays for k+1 by concatenating intermediates
-            ppa.clear();
-            ppa.reserve(a.size() + b.size());
-            ppa.insert(ppa.end(), a.begin(), a.end());
-            ppa.insert(ppa.end(), b.begin(), b.end());
-
-            div.clear();
-            div.reserve(d.size() + e.size());
-            div.insert(div.end(), d.begin(), d.end());
-            div.insert(div.end(), e.begin(), e.end());
-        }
-#pragma omp for schedule(static) ordered
-
-        for (int i = 0; i < omp_get_num_threads(); ++i) {
-#pragma omp ordered
-            {
-                ppa_t.push_back(ppa);
-                div_t.push_back(div);
-                range.push_back(vector<int>{start, finish});
-            }
+    for (int i = 0; i < M_haps; ++i) {
+        if (d[i] > p_val) p_val = d[i];
+        if (d[i] > q_val) q_val = d[i];
+        if (x_k[a[i]] == 0) {
+            a[u] = a[i];
+            d[u] = p_val;
+            u++;
+            p_val = 0;
+        } else {
+            b[v] = a[i];
+            e[v] = q_val;
+            v++;
+            q_val = 0;
         }
     }
-
-
-    for (int slice = 1; slice <= range.size() - 1; ++slice) {
-        // printf("\nStep %d:\n", slice);
-        algorithm4(M, range[slice][1], range[slice][0], ppa_t[slice], div_t[slice]
-                   , ppa_t[slice - 1], div_t[slice - 1]);
-    }
-    return vector<vector<vector<int> > >{ppa_t, div_t, range};
+    copy(b.begin(), b.begin() + v, a.begin() + u);
+    copy(e.begin(), e.begin() + v, d.begin() + u);
 }
 
+void algorithm_3_ReportLongMatches(
+    const vector<int> &x_k_val,
+    int N_total_sites,
+    int k_current_site,
+    int L_min_len,
+    const vector<int> &a_arr,
+    const vector<int> &d_arr,
+    int &i0_val,
+    vector<vector<int> > &matches_output_ref,
+    int M_total_haps) {
+    int u = 0;
+    int v = 0;
+    int ia = 0;
+    int ib = 0;
+    int dmin = 0;
 
-void algorithm4(const int M, const int k, const int b,
-                vector<int> &sorted_k, vector<int> &start_k,
-                const vector<int> &sorted_k_b, vector<int> &start_k_b
-) {
-    int index_k_b[M];
-    int group_id = 0;
-    for (int i = 0; i < M; ++i) {
-        index_k_b[sorted_k_b[i]] = i;
-    }
-    for (int i = 0; i < M; ++i) {
-        if (start_k[i] != b) {
-            if (i - group_id > 1) {
-                algorithm3(group_id, i, index_k_b, sorted_k, start_k, sorted_k_b, start_k_b);
-            }
-            group_id = i;
+    for (int i = 0; i < M_total_haps; ++i) {
+        bool condition_met = false;
+        int threshold = (k_current_site > L_min_len) ? (k_current_site - L_min_len) : 0;
+        if (d_arr[i] > threshold) {
+            condition_met = true;
         }
-    }
-    if (M - group_id > 1) {
-        algorithm3(group_id, M, index_k_b, sorted_k, start_k, sorted_k_b, start_k_b);
-    }
-}
 
-void algorithm3(const int id_start, const int id_end, const int index_k_b[],
-                vector<int> &sorted_k, vector<int> &start_k,
-                const vector<int> &sorted_k_b, vector<int> &start_k_b
-) {
-    int arr[id_end - id_start];
-    for (int i = id_start; i < id_end; ++i) {
-        arr[i - id_start] = index_k_b[sorted_k[i]];
-    }
-    sort(arr, arr + (id_end - id_start));
-    for (int i = id_start; i < id_end; ++i) {
-        sorted_k[i] = sorted_k_b[arr[i - id_start]];
-    }
-    for (int i = id_start + 1; i < id_end; ++i) {
-        int scan_start = arr[i - id_start - 1] + 1;
-        int scan_stop = arr[i - id_start];
-        auto new_val = max_element(start_k_b.begin() + scan_start, start_k_b.begin() + scan_stop + 1);
-        start_k[i] = *new_val;
-    }
-}
-
-vector<vector<int> > report_long_matches(const vector<vector<int> > &X, const int L, vector<vector<vector<int> > > res,
-                                         int thread) {
-    int M = static_cast<int>(X.size()); // Number of haplotypes
-    int N = static_cast<int>(X[0].size()); // Number of variable sites
-
-    vector<vector<int> > ppa_t = res[0];
-    vector<vector<int> > div_t = res[1];
-    vector<vector<int> > range = res[2];
-    // Initialize positional prefix array and divergence array
-    vector<int> ppa(M);
-    iota(ppa.begin(), ppa.end(), 0); // Fill ppa with 0, 1, 2, ..., M-1
-    vector<int> div(M, 0);
-
-    ppa_t.insert(ppa_t.begin(), ppa);
-    div_t.insert(div_t.begin(), div);
-
-    vector<vector<int> > results; // To store results
-    {
-        omp_set_dynamic(0);
-        omp_set_num_threads(thread);
-#pragma omp parallel for private(ppa,div)
-        for (int slice = 0; slice < range.size(); ++slice) {
-            // Iterate over variants
-            ppa = ppa_t[slice];
-            div = div_t[slice];
-            for (int k = range[slice][0]; k < range[slice][1]; ++k) {
-                vector<int> a, b, d, e, ma, mb;
-                int p = k + 1;
-                int q = k + 1;
-
-                // Iterate over haplotypes in reverse prefix sorted order
-                for (size_t i = 0; i < ppa.size(); ++i) {
-                    int index = ppa[i];
-                    int match_start = div[i];
-
-                    // Report matches
-                    if (match_start > k - L) {
-                        if (!ma.empty() && !mb.empty()) {
-                            // Store position k, ma, and mb in the result vector
-                            vector<int> result_entry;
-                            result_entry.push_back(k);
-                            result_entry.insert(result_entry.end(), ma.begin(), ma.end());
-                            result_entry.push_back(-1); // Separator for mb
-                            result_entry.insert(result_entry.end(), mb.begin(), mb.end());
+        if (condition_met) {
+            if (u > 0 && v > 0) {
+                for (ia = i0_val; ia < i; ++ia) {
+                    dmin = 0;
+                    for (ib = ia + 1; ib < i; ++ib) {
+                        if (d_arr[ib] > dmin) dmin = d_arr[ib];
+                        if (x_k_val[a_arr[ib]] != x_k_val[a_arr[ia]]) {
+                            if (k_current_site > dmin && (k_current_site - dmin >= L_min_len)) {
+                                int hap1 = min(a_arr[ia], a_arr[ib]);
+                                int hap2 = max(a_arr[ia], a_arr[ib]);
 #pragma omp critical
-                            results.push_back(result_entry);
+                                matches_output_ref.push_back({k_current_site, hap1, hap2, (k_current_site - dmin)});
+                            }
                         }
-                        ma.clear();
-                        mb.clear();
-                    }
-
-                    // Current haplotype
-                    const vector<int> &haplotype = X[index];
-                    int allele = haplotype[k];
-
-                    // Update intermediates
-                    if (match_start > p) p = match_start;
-                    if (match_start > q) q = match_start;
-
-                    // Update intermediates
-                    if (allele == 0) {
-                        a.push_back(index);
-                        d.push_back(p);
-                        p = 0;
-                        ma.push_back(index);
-                    } else {
-                        b.push_back(index);
-                        e.push_back(q);
-                        q = 0;
-                        mb.push_back(index);
                     }
                 }
+            }
+            u = 0;
+            v = 0;
+            i0_val = i;
+        }
+        if (x_k_val[a_arr[i]] == 0) {
+            u++;
+        } else {
+            v++;
+        }
+    }
 
-                // Report any remaining matches including final haplotype
-                if (!ma.empty() && !mb.empty()) {
-                    vector<int> result_entry;
-                    result_entry.push_back(k);
-                    result_entry.insert(result_entry.end(), ma.begin(), ma.end());
-                    result_entry.push_back(-1); // Separator for mb
-                    result_entry.insert(result_entry.end(), mb.begin(), mb.end());
+    if (u > 0 && v > 0) {
+        for (ia = i0_val; ia < M_total_haps; ++ia) {
+            dmin = 0;
+            for (ib = ia + 1; ib < M_total_haps; ++ib) {
+                if (d_arr[ib] > dmin) dmin = d_arr[ib];
+                if (x_k_val[a_arr[ib]] != x_k_val[a_arr[ia]]) {
+                    if (k_current_site > dmin && (k_current_site - dmin >= L_min_len)) {
+                        int hap1 = min(a_arr[ia], a_arr[ib]);
+                        int hap2 = max(a_arr[ia], a_arr[ib]);
 #pragma omp critical
-                    results.push_back(result_entry);
-                }
-
-                // Construct the new arrays for k+1
-                if (k < N - 1) {
-                    vector<int> new_ppa, new_div;
-
-                    new_ppa.reserve(a.size() + b.size());
-                    new_div.reserve(d.size() + e.size());
-
-                    new_ppa.insert(new_ppa.end(), a.begin(), a.end());
-                    new_ppa.insert(new_ppa.end(), b.begin(), b.end());
-
-                    new_div.insert(new_div.end(), d.begin(), d.end());
-                    new_div.insert(new_div.end(), e.begin(), e.end());
-
-                    ppa = move(new_ppa);
-                    div = move(new_div);
+                        matches_output_ref.push_back({k_current_site, hap1, hap2, (k_current_site - dmin)});
+                    }
                 }
             }
         }
     }
-    return results;
+}
+
+void fill_rppa(vector<int> &rppa, const vector<int> &ppa) {
+    const int N_rppa = ppa.size();
+    for (int i = 0; i < N_rppa; ++i) {
+        rppa[ppa[i]] = i;
+    }
+}
+
+pair<vector<int>, vector<int> > run_pbwt_sequentially(
+    const vector<vector<int> > &Xt,
+    int k_start_site,
+    int k_stop_site,
+    vector<int> initial_a,
+    vector<int> initial_d,
+    int M_haps,
+    int N_sites,
+    int L_min_len,
+    bool report_matches_flag,
+    vector<vector<int> > &matches_collector) {
+    vector<int> a(M_haps), b(M_haps);
+    if (!initial_a.empty()) {
+        a = initial_a;
+    } else {
+        a.resize(M_haps);
+        iota(a.begin(), a.end(), 0);
+    }
+
+    vector<int> d(M_haps), e(M_haps);
+    if (!initial_d.empty()) {
+        d = initial_d;
+    } else {
+        d.assign(M_haps, k_start_site);
+    }
+
+    int i0 = k_start_site > 0 ? M_haps : 0;
+
+    for (int k = k_start_site; k < k_stop_site; ++k) {
+        if (report_matches_flag) {
+            algorithm_3_ReportLongMatches(Xt[k], N_sites, k, L_min_len, a, d, i0, matches_collector, M_haps);
+        }
+        algorithm_2_BuildPrefixAndDivergenceArrays(Xt[k], k, a, b, d, e, M_haps);
+    }
+
+    if (report_matches_flag && k_stop_site == N_sites && k_stop_site > 0) {
+        algorithm_3_ReportLongMatches(Xt[N_sites - 1], N_sites, N_sites, L_min_len, a, d, i0, matches_collector,
+                                      M_haps);
+    }
+    return {a, d};
+}
+
+void fix_a_d_range_internal(int group_start_idx, int group_stop_idx,
+                            const vector<int> &prev_a_state, const vector<int> &prev_d_state,
+                            const vector<int> &rppa_lookup,
+                            vector<int> &current_a_to_fix, vector<int> &current_d_to_fix) {
+    vector<int> prev_pos_of_a_s_to_fix;
+    prev_pos_of_a_s_to_fix.reserve(group_stop_idx - group_start_idx);
+    for (int j = group_start_idx; j < group_stop_idx; ++j) {
+        prev_pos_of_a_s_to_fix.push_back(rppa_lookup[current_a_to_fix[j]]);
+    }
+    sort(prev_pos_of_a_s_to_fix.begin(), prev_pos_of_a_s_to_fix.end());
+
+    for (int j = group_start_idx; j < group_stop_idx; ++j) {
+        current_a_to_fix[j] = prev_a_state[prev_pos_of_a_s_to_fix[j - group_start_idx]];
+    }
+
+    for (int j = group_start_idx + 1; j < group_stop_idx; ++j) {
+        const int scan_start = prev_pos_of_a_s_to_fix[j - group_start_idx - 1] + 1;
+        const int scan_stop = prev_pos_of_a_s_to_fix[j - group_start_idx] + 1;
+        if (scan_start < scan_stop && scan_stop <= (int) prev_d_state.size()) {
+            current_d_to_fix[j] = *max_element(prev_d_state.begin() + scan_start, prev_d_state.begin() + scan_stop);
+        } else if (scan_start == scan_stop && scan_start > 0 && scan_start <= (int) prev_d_state.size()) {
+            current_d_to_fix[j] = prev_d_state[scan_start - 1];
+        }
+    }
+}
+
+void fix_checkpoints(
+    vector<vector<int> > &checkpoint_as,
+    vector<vector<int> > &checkpoint_ds,
+    const vector<int> &checkpoint_k_values,
+    int M_haps) {
+    if (checkpoint_as.empty()) return;
+    vector<int> rppa(M_haps);
+
+    for (int i = 1; i < (int) checkpoint_as.size(); ++i) {
+        vector<int> &a_to_fix = checkpoint_as[i];
+        vector<int> &d_to_fix = checkpoint_ds[i];
+        const vector<int> &prev_a = checkpoint_as[i - 1];
+        const vector<int> &prev_d = checkpoint_ds[i - 1];
+        int k_val_of_prev_state = checkpoint_k_values[i - 1];
+
+        fill_rppa(rppa, prev_a);
+
+        int first_same_seq_idx = 0;
+        for (int j = 0; j < M_haps; ++j) {
+            if (d_to_fix[j] != k_val_of_prev_state) {
+                int current_group_size = j - first_same_seq_idx;
+                if (current_group_size > 1) {
+                    fix_a_d_range_internal(first_same_seq_idx, j, prev_a, prev_d, rppa, a_to_fix, d_to_fix);
+                }
+                first_same_seq_idx = j;
+            }
+        }
+        int last_group_size_final = M_haps - first_same_seq_idx;
+        if (last_group_size_final > 1) {
+            fix_a_d_range_internal(first_same_seq_idx, M_haps, prev_a, prev_d, rppa, a_to_fix, d_to_fix);
+        }
+    }
+}
+
+vector<vector<int> > build_and_match(const vector<vector<int> > &hap_map_original, int num_threads, int L) {
+    omp_set_dynamic(0);
+    omp_set_num_threads(num_threads);
+
+    if (hap_map_original.empty() || hap_map_original[0].empty() || L <= 0) {
+        return {};
+    }
+
+    int M = hap_map_original.size();
+    int N = hap_map_original[0].size();
+
+    vector<vector<int> > Xt(N, vector<int>(M));
+    for (int r = 0; r < M; ++r) {
+        for (int c = 0; c < N; ++c) {
+            Xt[c][r] = hap_map_original[r][c];
+        }
+    }
+
+    vector<vector<int> > all_final_matches;
+    vector<int> checkpoint_positions_vec;
+
+    if (num_threads > 1 && N > 0) {
+        int step = N / num_threads;
+        if (step == 0 && N > 0) step = N; // Ensure at least one segment or full if N < num_threads
+        for (int i = 1; i < num_threads; ++i) {
+            int pos = step * i;
+            if (pos < N && pos > 0) {
+                checkpoint_positions_vec.push_back(pos);
+            } else {
+                break;
+            }
+        }
+        sort(checkpoint_positions_vec.begin(), checkpoint_positions_vec.end());
+        checkpoint_positions_vec.erase(unique(checkpoint_positions_vec.begin(), checkpoint_positions_vec.end()),
+                                       checkpoint_positions_vec.end());
+    }
+
+    vector<vector<int> > checkpoint_as_vec(checkpoint_positions_vec.size());
+    vector<vector<int> > checkpoint_ds_vec(checkpoint_positions_vec.size());
+
+    if (num_threads > 1 && !checkpoint_positions_vec.empty()) {
+#pragma omp parallel for
+        for (int i = 0; i < (int) checkpoint_positions_vec.size(); ++i) {
+            int k_start = (i == 0) ? 0 : checkpoint_positions_vec[i - 1];
+            int k_stop = checkpoint_positions_vec[i];
+
+            vector<int> seg_a_init(M);
+            iota(seg_a_init.begin(), seg_a_init.end(), 0);
+            vector<int> seg_d_init(M, k_start);
+
+            if (k_start < k_stop) {
+                pair<vector<int>, vector<int> > ad_pair = run_pbwt_sequentially(
+                    Xt, k_start, k_stop, seg_a_init, seg_d_init, M, N, L, false, all_final_matches);
+                checkpoint_as_vec[i] = ad_pair.first;
+                checkpoint_ds_vec[i] = ad_pair.second;
+            }
+        }
+        fix_checkpoints(checkpoint_as_vec, checkpoint_ds_vec, checkpoint_positions_vec, M);
+    }
+
+    vector<vector<vector<int> > > parallel_match_results(num_threads);
+#pragma omp parallel for
+    for (int i = 0; i < num_threads; ++i) {
+        int k_start_segment, k_stop_segment;
+        vector<int> a_segment_initial;
+        vector<int> d_segment_initial;
+
+        if (num_threads == 1 || checkpoint_positions_vec.empty()) {
+            k_start_segment = 0;
+            k_stop_segment = N;
+            a_segment_initial.resize(M);
+            iota(a_segment_initial.begin(), a_segment_initial.end(), 0);
+            d_segment_initial.assign(M, 0);
+        } else {
+            k_start_segment = (i == 0) ? 0 : checkpoint_positions_vec[i - 1];
+            k_stop_segment = (i == (int) checkpoint_positions_vec.size()) ? N : checkpoint_positions_vec[i];
+
+            if (i == 0) {
+                a_segment_initial.resize(M);
+                iota(a_segment_initial.begin(), a_segment_initial.end(), 0);
+                d_segment_initial.assign(M, 0);
+            } else {
+                if (i - 1 < (int) checkpoint_as_vec.size()) {
+                    // Ensure checkpoint exists
+                    a_segment_initial = checkpoint_as_vec[i - 1];
+                    d_segment_initial = checkpoint_ds_vec[i - 1];
+                } else {
+                    // Fallback if checkpoint logic had issues, process from start (less efficient but safer)
+                    a_segment_initial.resize(M);
+                    iota(a_segment_initial.begin(), a_segment_initial.end(), 0);
+                    d_segment_initial.assign(M, k_start_segment); // d relative to current start
+                }
+            }
+        }
+        if (k_start_segment < k_stop_segment) {
+            run_pbwt_sequentially(Xt, k_start_segment, k_stop_segment, a_segment_initial, d_segment_initial, M, N, L,
+                                  true, parallel_match_results[i]);
+        }
+    }
+
+    for (const auto &thread_matches: parallel_match_results) {
+        all_final_matches.insert(all_final_matches.end(), thread_matches.begin(), thread_matches.end());
+    }
+
+    if (!all_final_matches.empty()) {
+        sort(all_final_matches.begin(), all_final_matches.end());
+        all_final_matches.erase(unique(all_final_matches.begin(), all_final_matches.end()), all_final_matches.end());
+    }
+
+    return all_final_matches;
 }
 
 int main(int argc, char *argv[]) {
-    string f = argv[1];
-    printf("Read file: %s\n", f.c_str());
-    vector<vector<int> > X = read_hap(f);
-
-    const int retry = 1;
-    const int L = 4;
-    printf("Test size: %lu haps x %lu sites\n", X.size(), X[0].size());
-    printf("Retry: %d\n", retry);
-    printf("Matched length: %d\n", L);
-
-    int nthreads = static_cast<int>(thread::hardware_concurrency());
-    printf("Max thread:%d\n\n", nthreads);
-    for (int i = 1; i <= nthreads; ++i) {
-        printf("Num thread:%d\n", i);
-        signed long int duration_total_build = 0;
-        signed long int duration_total_match = 0;
-        high_resolution_clock::time_point start, stop;
-        vector<vector<int> > matches;
-        vector<vector<vector<int> > > res;
-        for (int j = 0; j < retry; ++j) {
-            start = high_resolution_clock::now();
-            res = build_prefix_and_divergence_arrays(X, i);
-            stop = high_resolution_clock::now();
-            duration_total_build += duration_cast<microseconds>(stop - start).count();
-            start = high_resolution_clock::now();
-            matches = report_long_matches(X, L, res, i);
-            stop = high_resolution_clock::now();
-            duration_total_match += duration_cast<microseconds>(stop - start).count();
-            print_matches(matches);
-        }
-        printf("Build time: %ld us\n", duration_total_build / retry);
-        printf("Match time: %ld us\n", duration_total_match / retry);
-        printf("Total time: %ld us\n\n", duration_total_match / retry + duration_total_build / retry);
-    }
+    parallel_run(argc, argv);
 }
-
