@@ -1,0 +1,23 @@
+g++-14 -O3 -fopenmp -std=c++17 -I/opt/homebrew/include -L/opt/homebrew/lib -o pbwt_single pbwt-single.cpp util.cpp -lboost_iostreams -lz
+
+
+g++-14 -O3 -fopenmp -std=c++17 -I/opt/homebrew/include -L/opt/homebrew/lib \
+-o pbwt_sites pbwt-sites.cpp util.cpp -lboost_iostreams -lz
+
+
+g++-14 -O3 -fopenmp -std=c++17 -I/opt/homebrew/include -L/opt/homebrew/lib \
+-o pbwt_haps pbwt-haps.cpp util.cpp -lboost_iostreams -lz
+
+./pbwt-single 4000SitesX4000Haps.hap
+./pbwt-parallel-sites 4000SitesX4000Haps.hap 
+./pbwt-parallel-haps 4000SitesX4000Haps.hap 
+ 
+
+ PBWT-GPT
+
+ \pbwt
+ g++-14 -std=c++17 -O2 /Users/NguyenLuan/pbwt-comparison/PBWT_GPT/pbwt.cpp -o /Users/NguyenLuan/pbwt-comparison/PBWT_GPT/pbwt
+
+ \ppbwt
+
+ 
